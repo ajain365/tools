@@ -151,6 +151,22 @@ int main( int argc, char* argv[] )
            pltEndAddr = r->getMemOffset() + r->getMemSize();
         }
     }
+    
+    const char* rodataStartPtr = nullptr;
+    const char* rodataEndPtr = nullptr;
+    int64_t rodataBeginAddr = 0, rodataEndAddr = 0;
+
+    std::ignore = obj->getDataRegions( reg );
+
+    for ( const auto r: reg ) {
+        auto rgnName = r->getRegionName();
+        if ( rgnName == ".rodata" ) {
+            rodataStartPtr = (const char*)r->getPtrToRawData();
+            rodataEndPtr = rodataStartPtr + r->getMemSize();
+            rodataBeginAddr = r->getMemOffset();
+            rodataEndAddr = r->getMemOffset() + r->getMemSize();
+        }
+    }
 
     // traverse call graph
     auto sts = new dp::SymtabCodeSource( const_cast<char*>( execName.c_str() ) );
@@ -160,19 +176,30 @@ int main( int argc, char* argv[] )
 
     std::unordered_set<Dyninst::Address> seen;
 
+    std::queue<dp::Block*> blkQueue;
+
     for ( auto const* f: funcList ) {
+        std::cout << f->name() << std::endl;
         for ( auto b: f->blocks() ) {
-            if ( seen.count( b->start() ) > 0 ) {
-                continue;	
+            blkQueue.push( b );
+        }
+    }
+
+    int numBlocks = 0;
+
+    while ( ! blkQueue.empty() ) {
+        auto b = blkQueue.front();
+        blkQueue.pop();
+        if ( seen.count( b->start() ) > 0 ) {
+            continue;
+        }
+        numBlocks++;
+        seen.insert( b->start() );
+        for ( auto e: b->targets() ) {
+            if ( ! e ) {
+                continue;
             }
-            seen.insert( b->start() );
-            // look at outgoing edges to find calls
-            for ( auto e: b->targets() ) {
-                if ( ! e ) {
-                    continue;
-                }
-                if ( e->type() == dp::CALL ) {
-                    // if it is a call we are going to follow it
+            if ( e->type() == dp::CALL ) {
                     auto calltgt = e->trg();
                     if ( calltgt->start() >= pltBeginAddr && calltgt->end() <= pltEndAddr ) {
 
@@ -194,10 +221,17 @@ int main( int argc, char* argv[] )
                         } else if ( funcName == "dlsym" ) {
                             std::cout << funcName << " : "
                                       << trackArgRegisterString( "RSI", b, obj ) << std::endl;
+                        } else {
+                            //std::cout << funcName << std::endl;
                         }
                     }
-                }
+ 
+            }
+            auto calltgt = e->trg();
+            if ( calltgt ) {
+                blkQueue.push( calltgt );
             }
         }
     }
+    std::cout << "Total Blocks Discovered: " << numBlocks << std::endl;
 }
