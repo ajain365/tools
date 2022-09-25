@@ -18,6 +18,7 @@ find_package(Dyninst REQUIRED
                         instructionAPI
                         parseAPI
                         symtabAPI
+                        dataflowAPI
                         common)
 
 # Read the cache generated from building Dyninst

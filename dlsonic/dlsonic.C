@@ -3,17 +3,20 @@
 #include <vector>
 #include <queue>
 #include "BPatch.h"
-
+#include "Graph.h"
+#include "slicing.h"
 #include "dyn_regs.h"
 #include "CFG.h"
 #include "CodeObject.h"
 #include "InstructionDecoder.h"
 #include "entryIDs.h"
 #include <elf.h>
+#include "Node.h"
 
 namespace dp = Dyninst::ParseAPI; 
 namespace ds = Dyninst::SymtabAPI;
 namespace di = Dyninst::InstructionAPI;
+namespace df = Dyninst::DataflowAPI;
 
 namespace {
 
@@ -45,7 +48,68 @@ private:
 
 std::string UNKNOWN = "<unknown>";
 
-std::string trackArgRegisterString( std::string rgName, dp::Block* blk, ds::Symtab* obj )
+
+class ConstantPred : public Dyninst::Slicer::Predicates
+{
+public:
+    virtual bool endAtPoint( Dyninst::Assignment::Ptr ap ) {
+        return ap->insn().writesMemory();
+    }
+
+    virtual bool addPredecessor( Dyninst::AbsRegion reg ) {
+        if ( reg.absloc().type() == Dyninst::Absloc::Register ) {
+            auto r = reg.absloc().reg();
+            return !r.isPC();
+        }
+        return true;
+    }
+};
+
+void doBackwardSlice( ds::Symtab* obj, di::Instruction ins, int32_t insaddr, const dp::Function* fn, dp::Block* b )
+{
+    auto f = const_cast<dp::Function*>( fn );
+    di::Instruction insn = b->getInsn( b->last() );
+    Dyninst::AssignmentConverter ac( true, false );
+    
+    std::vector<Dyninst::Assignment::Ptr> assignments;
+
+    ac.convert( ins, insaddr, f, b, assignments );
+    
+    Dyninst::Assignment::Ptr pcAssign;
+    for ( auto ait = assignments.begin(); ait != assignments.end(); ++ait ) {
+        std::cout << (*ait)->format() << std::endl;
+        const Dyninst::AbsRegion& out = (*ait)->out();
+        // just try to look for the assignment related to rdi
+        if ( out.absloc().type() == Dyninst::Absloc::Register && out.absloc().reg().name() == "x86_64::rdi" ) {
+            pcAssign = *ait;
+            break;
+        }
+    }
+
+    if ( ! pcAssign.get() ) {
+        return;
+    }
+    
+    Dyninst::Slicer s( pcAssign, b, f, true, false );
+    ConstantPred mp;
+    
+    auto slice = s.backwardSlice( mp );
+    slice->printDOT("alpha.txt");
+
+    Dyninst::NodeIterator bgn, edn;
+
+    slice->allNodes( bgn, edn );
+
+    for ( auto it = bgn; it != edn; it++ ) {
+        auto sliceNode = dynamic_cast<Dyninst::SliceNode*>( (*it).get() );
+        auto insn = sliceNode->assign()->insn();
+        std::cout << std::hex << sliceNode->addr() << " " << insn.format() << std::endl;
+    }
+}
+
+
+
+std::string trackArgRegisterString( std::string rgName, dp::Block* blk, ds::Symtab* obj, const dp::Function* fn )
 {
     // Currently we only handle the case when we have a static string assigned
     // i.e. we have an instruction: lea REG [ADDR in RODATA]
@@ -110,6 +174,9 @@ std::string trackArgRegisterString( std::string rgName, dp::Block* blk, ds::Symt
         return UNKNOWN;
     }
 
+    std::cout << std::endl << std::endl;    
+    doBackwardSlice( obj, targetInst.first, targetInst.second, fn, blk ); 
+
     // We want to look for first LEA instruction to the arg register we are tracking
     if ( targetInst.first.getOperation().getID() == e_lea 
          && targetInst.first.getOperand(0).getValue()->format() == rgName ) {
@@ -160,7 +227,6 @@ std::string trackArgRegisterString( std::string rgName, dp::Block* blk, ds::Symt
         return UNKNOWN;
     }
 }
-
 } // end anonymous namespace
 
 int main( int argc, char* argv[] )
@@ -233,14 +299,14 @@ int main( int argc, char* argv[] )
 
                         if ( funcName == "dlopen" ) {
                             Stats::Instance().dlopenCount++;
-                            auto param = trackArgRegisterString( "RDI", b, obj );
+                            auto param = trackArgRegisterString( "RDI", b, obj, f );
                             if ( param != UNKNOWN ) { 
                                 Stats::Instance().dlopenWithStaticString++;    
                             }
                             std::cout << funcName << " : " << param << std::endl;
                         } else if ( funcName == "dlsym" ) {
                             Stats::Instance().dlsymCount++;
-                            auto param = trackArgRegisterString( "RSI", b, obj );
+                            auto param = trackArgRegisterString( "RSI", b, obj, f );
                             if ( param != UNKNOWN ) {
                                 Stats::Instance().dlsymWithStaticString++;
                             }
