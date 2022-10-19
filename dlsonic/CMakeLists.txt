@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13.0)
-project(dlsonicproject LANGUAGES CXX)
+project(dlsonicdebug LANGUAGES CXX)
 
 set(_dyninst_dir $ENV{Dyninst_DIR})
 set(Dyninst_DIR ${_dyninst_dir})
@@ -31,15 +31,14 @@ load_cache(${Dyninst_DIR}
            TBB_INCLUDE_DIRS)
 
 # The main tool executable
-add_executable(dlsonic dlsonic.C)
-target_include_directories(dlsonic PRIVATE ${DYNINST_INCLUDE_DIR} ${DYNINST_Boost_INCLUDE_DIRS} ${DYNINST_TBB_INCLUDE_DIRS})
-target_link_libraries(dlsonic common dyninstAPI  parseAPI symtabAPI instructionAPI ${DYNINST_Boost_LIBRARIES})
+add_executable(launch launch.C)
+target_include_directories(launch PRIVATE ${DYNINST_INCLUDE_DIR} ${DYNINST_Boost_INCLUDE_DIRS} ${DYNINST_TBB_INCLUDE_DIRS})
+target_link_libraries(launch common dyninstAPI  parseAPI symtabAPI instructionAPI ${DYNINST_Boost_LIBRARIES})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-	target_compile_options(dlsonic PRIVATE "-fno-pie")
-	target_link_options(dlsonic PRIVATE "-no-pie")
+	target_compile_options(launch PRIVATE "-fno-pie")
+	target_link_options(launch PRIVATE "-no-pie")
 endif()
 
-add_custom_target(dlsonicproject DEPENDS dlsonic)
+add_custom_target(dlsonicdebug DEPENDS launch)
 
-add_subdirectory(testbins)
